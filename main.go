@@ -4,15 +4,24 @@ package main
 //append below to ~./bashrc
 //export PATH=$PATH:/usr/local/go/bin
 import (
+	"crypto/tls"
 	"database/sql"
 	"fmt"
 	"log"
 	"os"
 	"strings"
 
-	_ "github.com/go-sql-driver/mysql"
+	"github.com/go-sql-driver/mysql"
 	"github.com/joho/godotenv"
 )
+
+
+type DBConfig struct {
+	Username string
+	Password string
+	Hostname string
+	DBName   string
+}
 
 const (
 	chunkSize = 1000 // number of rows to fetch and insert at once
@@ -24,16 +33,32 @@ func main() {
 		log.Fatal("Error loading .env file")
 	}
 
-	masterDSN := os.Getenv("MASTER_DSN")
-	slaveDSN := os.Getenv("SLAVE_DSN")
+	//masterDSN := os.Getenv("MASTER_DSN")
+	//slaveDSN := os.Getenv("SLAVE_DSN")
 
-	masterDb, err := sql.Open("mysql", masterDSN)
+	configMaster := DBConfig{
+		Username: os.Getenv("DB_USERNAME1"),
+		Password: os.Getenv("DB_PASSWORD1"),
+		Hostname: os.Getenv("DB_HOST1"),
+		DBName:   os.Getenv("DB_NAME1"),
+	}
+
+	masterDb, err := ConnectToDB(configMaster)
 	if err != nil {
 		log.Fatalf("Failed to connect to master: %s", err)
 	}
 	defer masterDb.Close()
 
-	slaveDb, err := sql.Open("mysql", slaveDSN)
+
+
+	configSlave := DBConfig{
+		Username: os.Getenv("DB_USERNAME2"),
+		Password: os.Getenv("DB_PASSWORD2"),
+		Hostname: os.Getenv("DB_HOST2"),
+		DBName:   os.Getenv("DB_NAME2"),
+	}
+
+	slaveDb, err := ConnectToDB(configSlave)
 	if err != nil {
 		log.Fatalf("Failed to connect to slave: %s", err)
 	}
@@ -43,6 +68,24 @@ func main() {
 	for _, table := range tables {
 		syncTable(masterDb, slaveDb, table)
 	}
+}
+
+func ConnectToDB(config DBConfig) (*sql.DB, error) {
+	mysql.RegisterTLSConfig("custom", &tls.Config{
+		InsecureSkipVerify: true,
+	})
+
+	dsn := fmt.Sprintf("%s:%s@tcp(%s)/?parseTime=true&tls=custom", config.Username, config.Password, config.Hostname)
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return nil, err
+	}
+
+	if err = db.Ping(); err != nil {
+		return nil, err
+	}
+
+	return db, nil
 }
 
 func getTables(db *sql.DB) []string {
