@@ -28,6 +28,11 @@ const (
 )
 
 func main() {
+
+	var masterDb *sql.DB
+	var slaveDb *sql.DB
+
+
 	err := godotenv.Load()
 	if err != nil {
 		log.Fatal("Error loading .env file")
@@ -43,14 +48,29 @@ func main() {
 		DBName:   os.Getenv("DB_NAME1"),
 	}
 
-	masterDb, err := ConnectToDB(configMaster)
+	// Check if SSL is required
+	if os.Getenv("DB_SSL1") != "" {
+		// Connect to the DB with TLS
+		masterDb, err = ConnectToDB(configMaster)
+		if err != nil {
+			log.Fatalf("Failed to connect to master: %s", err)
+		}
+	} else {
+		
+		// Connect to the DB without TLS
+		masterDb, err = normalConnectToDB(configMaster)
+		if err != nil {
+			log.Fatalf("Failed to connect to master: %s", err)
+		}
+	}
+
 	if err != nil {
 		log.Fatalf("Failed to connect to master: %s", err)
 	}
 	defer masterDb.Close()
 
 
-
+	
 	configSlave := DBConfig{
 		Username: os.Getenv("DB_USERNAME2"),
 		Password: os.Getenv("DB_PASSWORD2"),
@@ -58,10 +78,26 @@ func main() {
 		DBName:   os.Getenv("DB_NAME2"),
 	}
 
-	slaveDb, err := ConnectToDB(configSlave)
-	if err != nil {
-		log.Fatalf("Failed to connect to slave: %s", err)
+	//fmt.Println(configSlave)
+
+	// Check if SSL is required
+	if os.Getenv("DB_SSL2") != "" {
+		// Connect to the DB with TLS
+		slaveDb, err = ConnectToDB(configSlave)
+		if err != nil {
+			log.Fatalf("Failed to connect to slave: %s", err)
+		}
+	} else {
+		
+		// Connect to the DB without TLS
+		slaveDb, err = normalConnectToDB(configSlave)
+		if err != nil {
+			log.Fatalf("Failed to connect to slave: %s", err)
+		}
 	}
+
+
+	
 	defer slaveDb.Close()
 
 	tables := getTables(masterDb)
@@ -71,16 +107,40 @@ func main() {
 }
 
 func ConnectToDB(config DBConfig) (*sql.DB, error) {
-	mysql.RegisterTLSConfig("custom", &tls.Config{
-		InsecureSkipVerify: true,
-	})
+    // Register a custom TLS config that skips server's certificate verification.
+    mysql.RegisterTLSConfig("custom", &tls.Config{
+        InsecureSkipVerify: true,
+    })
 
-	dsn := fmt.Sprintf("%s:%s@tcp(%s)/?parseTime=true&tls=custom", config.Username, config.Password, config.Hostname)
+    // Include the DBName in the DSN
+    dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?parseTime=true&tls=custom", config.Username, config.Password, config.Hostname, config.DBName)
+
+    db, err := sql.Open("mysql", dsn)
+    if err != nil {
+        return nil, err
+    }
+
+    err = db.Ping()
+    if err != nil {
+        return nil, err
+    }
+
+    return db, nil
+}
+
+
+
+func normalConnectToDB(config DBConfig) (*sql.DB, error) {
+	// Create the Data Source Name (DSN), without custom TLS config
+	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?parseTime=true", config.Username, config.Password, config.Hostname, config.DBName)
+
+	// Open a new connection to the database
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return nil, err
 	}
 
+	// Ping the database to verify connection establishment
 	if err = db.Ping(); err != nil {
 		return nil, err
 	}
