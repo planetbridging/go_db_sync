@@ -102,9 +102,38 @@ func main() {
 
 	tables := getTables(masterDb)
 	for _, table := range tables {
+		isView, err := isView(masterDb, os.Getenv("DB_NAME1"), table)
+		if err != nil {
+			log.Printf("Failed to check if %s is a view: %s", table, err)
+			continue // Skip to the next table instead of stopping the entire process
+		}
+		if isView {
+			log.Printf("%s is a view. Skipping...", table)
+			continue // Skip to the next table
+		}
+
 		syncTable(masterDb, slaveDb, table)
 	}
+
 }
+
+func isView(db *sql.DB, dbName, tableName string) (bool, error) {
+    query := `
+    SELECT TABLE_NAME 
+    FROM information_schema.VIEWS 
+    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?;
+    `
+    var result string
+    err := db.QueryRow(query, dbName, tableName).Scan(&result)
+    if err != nil {
+        if err == sql.ErrNoRows {
+            return false, nil // Not a view
+        }
+        return false, err
+    }
+    return true, nil // Is a view
+}
+
 
 func ConnectToDB(config DBConfig) (*sql.DB, error) {
     // Register a custom TLS config that skips server's certificate verification.
