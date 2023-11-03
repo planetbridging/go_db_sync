@@ -11,6 +11,9 @@ import (
 	"os"
 	"strings"
 
+	"encoding/csv"
+	"io"
+
 	"github.com/go-sql-driver/mysql"
 	"github.com/joho/godotenv"
 )
@@ -64,6 +67,21 @@ func main() {
 		}
 	}
 
+
+	columnsToExport := os.Getenv("COLS")
+	if len(columnsToExport) > 1 {
+		tableName := os.Getenv("TBL")
+		fmt.Println("starting exporting")
+		// Export table to CSV
+		err = exportTableToCSV(masterDb, tableName, columnsToExport)
+		if err != nil {
+			log.Fatalf("Failed to export table to CSV: %v", err)
+		}
+
+		return
+	}
+
+
 	if err != nil {
 		log.Fatalf("Failed to connect to master: %s", err)
 	}
@@ -116,6 +134,68 @@ func main() {
 	}
 
 }
+
+func exportTableToCSV(db *sql.DB, tableName string, columns string) error {
+	columnsSlice := strings.Split(columns, ",")
+
+	// Create the CSV file
+	file, err := os.Create(fmt.Sprintf("%s.csv", tableName))
+	if err != nil {
+		return fmt.Errorf("failed to create CSV file: %v", err)
+	}
+	defer file.Close()
+
+	writer := csv.NewWriter(file)
+	defer writer.Flush()
+
+	// Write the header to the CSV file
+	if err := writer.Write(columnsSlice); err != nil {
+		return fmt.Errorf("failed to write header to CSV file: %v", err)
+	}
+
+	// Query the table
+	query := fmt.Sprintf("SELECT %s FROM %s", columns, tableName)
+	rows, err := db.Query(query)
+	if err != nil {
+		return fmt.Errorf("failed to query table: %v", err)
+	}
+	defer rows.Close()
+
+	// Fetch rows and write to the CSV file
+	for rows.Next() {
+		record := make([]interface{}, len(columnsSlice))
+		scanArgs := make([]interface{}, len(columnsSlice))
+		for i := range record {
+			var value string
+			scanArgs[i] = &value
+			record[i] = &value
+		}
+		if err := rows.Scan(scanArgs...); err != nil {
+			return fmt.Errorf("failed to scan row: %v", err)
+		}
+
+		strRecord := make([]string, len(columnsSlice))
+		for i, v := range record {
+			// Convert interface{} to string
+			strValue, ok := v.(*string)
+			if !ok {
+				return fmt.Errorf("failed to convert record value to string")
+			}
+			strRecord[i] = *strValue
+		}
+
+		if err := writer.Write(strRecord); err != nil {
+			return fmt.Errorf("failed to write record to CSV file: %v", err)
+		}
+	}
+
+	if err := rows.Err(); err != nil && err != io.EOF {
+		return fmt.Errorf("failed reading rows: %v", err)
+	}
+
+	return nil
+}
+
 
 func isView(db *sql.DB, dbName, tableName string) (bool, error) {
     query := `
