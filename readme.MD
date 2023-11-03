@@ -25,6 +25,7 @@ DB_SSL2=
 ```
 
 Only add if you want to dump tbl
+```env
 COLS=id,timestamp,site_id,speed 
 TBL=vehicle
 ```
